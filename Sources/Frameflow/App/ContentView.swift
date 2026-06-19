@@ -51,6 +51,12 @@ struct ContentView: View {
     @State private var appliedCrops: [URL: NormalizedCrop] = [:]
     @State private var appliedTrims: [URL: MediaTrim] = [:]
     @State private var showTweaksPanel: Bool = false
+    @State private var multiViewSlots: [MediaItem?] = [nil, nil, nil, nil]
+    @State private var multiViewSplitX: CGFloat = 0.5
+    @State private var multiViewSplitY: CGFloat = 0.5
+    @State private var multiViewPaused: Bool = false
+    @State private var multiViewMuted: Bool = true
+    @State private var multiViewDragOverSlot: Int?
 
     @Binding private var tweakThemeID: EditorThemeID
     @Binding private var tweakDensity: TweakDensity
@@ -176,6 +182,9 @@ struct ContentView: View {
             case .videoComposer:
                 showThumbnailPanel = false
                 showPinnedPanel = false
+            case .multiView:
+                showThumbnailPanel = true
+                showPinnedPanel = false
             }
         }
     }
@@ -252,6 +261,9 @@ struct ContentView: View {
                                 .onTapGesture {
                                     handleThumbnailEntryTap(entry)
                                 }
+                                .onDrag {
+                                    NSItemProvider(object: itemEntry.item.url as NSURL)
+                                }
                                 .contextMenu {
                                     let contextItems = thumbnailContextItems(for: itemEntry.item)
 
@@ -261,6 +273,20 @@ struct ContentView: View {
 
                                     Button(timelineClipMenuTitle(for: contextItems)) {
                                         addToTimeline(contextItems, activateComposer: false)
+                                    }
+
+                                    Menu(multiViewMenuTitle(for: contextItems)) {
+                                        Button("Next Available Slot") {
+                                            addToMultiView(contextItems)
+                                        }
+
+                                        Divider()
+
+                                        ForEach(0..<4, id: \.self) { slot in
+                                            Button(multiViewSlotMenuTitle(for: slot)) {
+                                                addToMultiView(contextItems, startingAt: slot)
+                                            }
+                                        }
                                     }
 
                                     Button(pinMenuTitle(for: contextItems)) {
@@ -350,6 +376,17 @@ struct ContentView: View {
                 .buttonStyle(.plain)
                 .quickTooltip("Show in Clips")
                 .accessibilityLabel("Show in Clips")
+
+                Button {
+                    addToMultiView(selectedItems)
+                } label: {
+                    Image(systemName: "rectangle.split.2x2")
+                        .font(.system(size: 13, weight: .medium))
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .quickTooltip("Add to Multi-View")
+                .accessibilityLabel("Add to Multi-View")
 
                 Button {
                     pin(selectedItems)
@@ -958,7 +995,7 @@ struct ContentView: View {
     }
 
     private var visibleEditorTabs: [MainPanelTab] {
-        [.preview, .videoComposer].filter { mainPanelState.isVisible($0) }
+        [.preview, .videoComposer, .multiView].filter { mainPanelState.isVisible($0) }
     }
 
     private var selectedCrop: NormalizedCrop {
@@ -1100,6 +1137,8 @@ struct ContentView: View {
             quickSortWorkbench
         case .videoComposer:
             composerWorkbench
+        case .multiView:
+            multiViewWorkbench
         }
     }
 
@@ -1156,6 +1195,333 @@ struct ContentView: View {
                 .frame(minHeight: 120, idealHeight: 150, maxHeight: 190)
         }
         .background(theme.canvasBackground)
+    }
+
+    private var multiViewWorkbench: some View {
+        HSplitView {
+            thumbnailPanel
+                .frame(
+                    minWidth: showThumbnailPanel ? 190 : collapsedPanelWidth,
+                    idealWidth: showThumbnailPanel ? 230 : collapsedPanelWidth,
+                    maxWidth: showThumbnailPanel ? 320 : collapsedPanelWidth
+                )
+
+            multiViewMainPanel
+                .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
+                .layoutPriority(1)
+        }
+        .background(theme.canvasBackground)
+    }
+
+    private var multiViewMainPanel: some View {
+        VStack(spacing: 0) {
+            multiViewHeader
+            multiViewCanvas
+        }
+        .background(theme.canvasBackground)
+    }
+
+    private var multiViewFilledCount: Int {
+        multiViewSlots.lazy.filter { $0 != nil }.count
+    }
+
+    private var multiViewHeader: some View {
+        HStack(spacing: 12) {
+            Text("MULTI-VIEW")
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .tracking(1.4)
+                .foregroundStyle(theme.secondaryText)
+
+            Text("2×2 · looping")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(theme.mutedText)
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
+
+            Text("\(multiViewFilledCount) / 4 loaded")
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(theme.secondaryText)
+
+            multiViewHeaderButton(
+                title: multiViewPaused ? "Play" : "Pause",
+                systemImage: multiViewPaused ? "play.fill" : "pause.fill"
+            ) {
+                multiViewPaused.toggle()
+            }
+            .disabled(multiViewFilledCount == 0)
+
+            multiViewHeaderButton(
+                title: multiViewMuted ? "Muted" : "Audio",
+                systemImage: multiViewMuted ? "speaker.slash.fill" : "speaker.wave.2.fill"
+            ) {
+                multiViewMuted.toggle()
+            }
+            .disabled(multiViewFilledCount == 0)
+
+            multiViewHeaderButton(title: "Reset layout", systemImage: "arrow.counterclockwise") {
+                resetMultiViewLayout()
+            }
+
+            multiViewHeaderButton(title: "Clear", systemImage: "xmark", isDestructive: true) {
+                clearMultiView()
+            }
+            .disabled(multiViewFilledCount == 0)
+        }
+        .frame(height: 46)
+        .padding(.horizontal, 16)
+        .background(theme.panelBackground)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(theme.hairline)
+                .frame(height: 0.5)
+        }
+    }
+
+    private func multiViewHeaderButton(
+        title: String,
+        systemImage: String,
+        isDestructive: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 10, weight: .semibold))
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+            }
+            .frame(height: 30)
+            .padding(.horizontal, 12)
+            .overlay(
+                RoundedRectangle(cornerRadius: 7)
+                    .stroke(theme.strongHairline, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(isDestructive ? theme.danger : theme.primaryText)
+        .accessibilityLabel(title)
+    }
+
+    private var multiViewCanvas: some View {
+        GeometryReader { geometry in
+            let gap: CGFloat = 5
+            let width = geometry.size.width
+            let height = geometry.size.height
+            let splitX = min(max(multiViewSplitX, 0.14), 0.86)
+            let splitY = min(max(multiViewSplitY, 0.14), 0.86)
+            let leftWidth = max(0, width * splitX - gap / 2)
+            let rightWidth = max(0, width * (1 - splitX) - gap / 2)
+            let topHeight = max(0, height * splitY - gap / 2)
+            let bottomHeight = max(0, height * (1 - splitY) - gap / 2)
+            let dividerHit: CGFloat = 14
+
+            ZStack(alignment: .topLeading) {
+                multiViewTile(slotIndex: 0)
+                    .frame(width: leftWidth, height: topHeight)
+                    .offset(x: 0, y: 0)
+
+                multiViewTile(slotIndex: 1)
+                    .frame(width: rightWidth, height: topHeight)
+                    .offset(x: leftWidth + gap, y: 0)
+
+                multiViewTile(slotIndex: 2)
+                    .frame(width: leftWidth, height: bottomHeight)
+                    .offset(x: 0, y: topHeight + gap)
+
+                multiViewTile(slotIndex: 3)
+                    .frame(width: rightWidth, height: bottomHeight)
+                    .offset(x: leftWidth + gap, y: topHeight + gap)
+
+                // Vertical divider
+                Rectangle()
+                    .fill(Color.white.opacity(0.16))
+                    .frame(width: 2, height: height)
+                    .frame(width: dividerHit, height: height)
+                    .contentShape(Rectangle())
+                    .position(x: width * splitX, y: height / 2)
+                    .gesture(multiViewDividerDrag(axis: .horizontal, in: geometry.size))
+
+                // Horizontal divider
+                Rectangle()
+                    .fill(Color.white.opacity(0.16))
+                    .frame(width: width, height: 2)
+                    .frame(width: width, height: dividerHit)
+                    .contentShape(Rectangle())
+                    .position(x: width / 2, y: height * splitY)
+                    .gesture(multiViewDividerDrag(axis: .vertical, in: geometry.size))
+
+                // Center knob
+                ZStack {
+                    Circle()
+                        .fill(theme.panelBackground)
+                        .overlay(Circle().stroke(theme.strongHairline, lineWidth: 1))
+                    Circle()
+                        .fill(theme.accent)
+                        .frame(width: 6, height: 6)
+                }
+                .frame(width: 24, height: 24)
+                .position(x: width * splitX, y: height * splitY)
+                .gesture(multiViewDividerDrag(axis: .both, in: geometry.size))
+            }
+            .frame(width: width, height: height, alignment: .topLeading)
+            .coordinateSpace(name: multiViewCanvasSpace)
+        }
+        .padding(14)
+        .background(theme.canvasBackground)
+    }
+
+    private let multiViewCanvasSpace = "multiViewCanvas"
+
+    private enum MultiViewDividerAxis {
+        case horizontal
+        case vertical
+        case both
+    }
+
+    private func multiViewDividerDrag(axis: MultiViewDividerAxis, in size: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .named(multiViewCanvasSpace))
+            .onChanged { value in
+                if axis != .vertical, size.width > 0 {
+                    multiViewSplitX = min(max(value.location.x / size.width, 0.14), 0.86)
+                }
+                if axis != .horizontal, size.height > 0 {
+                    multiViewSplitY = min(max(value.location.y / size.height, 0.14), 0.86)
+                }
+            }
+    }
+
+    private func multiViewTile(slotIndex: Int) -> some View {
+        let item = multiViewSlots[slotIndex]
+        let isDragOver = multiViewDragOverSlot == slotIndex
+
+        return ZStack {
+            if let item {
+                MultiViewTileContent(item: item, paused: multiViewPaused, muted: multiViewMuted)
+
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 6) {
+                        HStack(spacing: 6) {
+                            Text(item.fileName)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+
+                            Text(item.kind.label.uppercased())
+                                .font(.system(size: 8, weight: .semibold, design: .monospaced))
+                                .tracking(0.5)
+                                .foregroundStyle(Color(red: 0.05, green: 0.11, blue: 0.16))
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(theme.clipBlue, in: RoundedRectangle(cornerRadius: 3))
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(Color.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 6))
+
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 11)
+                    .padding(.top, 9)
+
+                    Spacer(minLength: 0)
+
+                    if item.kind == .video || item.kind == .gif {
+                        HStack(spacing: 5) {
+                            Circle()
+                                .fill(theme.accent)
+                                .frame(width: 6, height: 6)
+                            Text("LOOP")
+                                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                                .tracking(0.8)
+                                .foregroundStyle(.white.opacity(0.78))
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 5))
+                        .padding(.horizontal, 11)
+                        .padding(.bottom, 10)
+                    }
+                }
+                .allowsHitTesting(false)
+
+                VStack {
+                    HStack {
+                        Spacer(minLength: 0)
+                        Button {
+                            removeFromMultiView(slot: slotIndex)
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 9, weight: .bold))
+                                .frame(width: 23, height: 23)
+                                .foregroundStyle(.white)
+                                .background(Color.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 6))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .stroke(Color.white.opacity(0.18), lineWidth: 1)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Remove from Multi-View")
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(8)
+            } else {
+                multiViewEmptyTile(slotIndex: slotIndex)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(red: 0.02, green: 0.03, blue: 0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 5))
+        .overlay(
+            RoundedRectangle(cornerRadius: 5)
+                .stroke(isDragOver ? theme.accent : Color.white.opacity(0.1), lineWidth: isDragOver ? 2 : 1)
+        )
+        .overlay {
+            if isDragOver {
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(theme.accent.opacity(0.1))
+                    .allowsHitTesting(false)
+            }
+        }
+        .onDrop(of: [UTType.fileURL.identifier, UTType.plainText.identifier], isTargeted: nil) { providers in
+            handleMultiViewDrop(providers, slotIndex: slotIndex)
+        }
+    }
+
+    private func multiViewEmptyTile(slotIndex: Int) -> some View {
+        VStack(spacing: 11) {
+            Image(systemName: "plus")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(theme.mutedText)
+                .frame(width: 38, height: 38)
+                .overlay(Circle().stroke(theme.strongHairline, lineWidth: 1.5))
+
+            Text("Click or drag a clip here")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(theme.mutedText)
+
+            Text("VIEW \(slotIndex + 1)")
+                .font(.system(size: 10, weight: .regular, design: .monospaced))
+                .tracking(1)
+                .foregroundStyle(theme.mutedText.opacity(0.7))
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(9)
+        .overlay(
+            RoundedRectangle(cornerRadius: 7)
+                .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [6, 5]))
+                .foregroundStyle(Color.white.opacity(0.15))
+                .padding(9)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if let item = activeThumbnailItem() ?? selectedItem {
+                placeInMultiView(item, slot: slotIndex)
+            }
+        }
     }
 
     private var mainPanelTabBar: some View {
@@ -2367,6 +2733,20 @@ struct ContentView: View {
         .contentShape(Rectangle())
         .contextMenu {
             if let item = selectedItem {
+                Menu(multiViewMenuTitle(for: [item])) {
+                    Button("Next Available Slot") {
+                        addToMultiView([item])
+                    }
+
+                    Divider()
+
+                    ForEach(0..<4, id: \.self) { slot in
+                        Button(multiViewSlotMenuTitle(for: slot)) {
+                            addToMultiView([item], startingAt: slot)
+                        }
+                    }
+                }
+
                 Button(pinMenuTitle(for: item)) {
                     pin(item)
                 }
@@ -2577,6 +2957,12 @@ struct ContentView: View {
                 return false
             }
             playerPlaybackToggleRequest = PlaybackToggleRequest()
+            return true
+        case .multiView:
+            guard multiViewSlots.contains(where: { $0 != nil }) else {
+                return false
+            }
+            multiViewPaused.toggle()
             return true
         }
     }
@@ -2983,6 +3369,106 @@ struct ContentView: View {
         selectedEditorClipID = items.last?.id
 
         mainPanelState.show(.videoComposer)
+    }
+
+    /// Loads items into Multi-View, filling each next available slot in order.
+    /// Mirrors "Add to Timeline"/"Pin Files": activates the Multi-View tab and
+    /// stops once every slot is full.
+    private func addToMultiView(_ items: [MediaItem]) {
+        guard !items.isEmpty else { return }
+        mainPanelState.show(.multiView)
+
+        for item in items {
+            guard let slot = multiViewSlots.firstIndex(where: { $0 == nil }) else {
+                break
+            }
+            multiViewSlots[slot] = item
+        }
+    }
+
+    /// Loads items starting at a specific slot (Panel 1–4), continuing into the
+    /// following slots when more than one item is selected.
+    private func addToMultiView(_ items: [MediaItem], startingAt slot: Int) {
+        guard !items.isEmpty, multiViewSlots.indices.contains(slot) else { return }
+        mainPanelState.show(.multiView)
+
+        for (offset, item) in items.enumerated() {
+            let index = slot + offset
+            guard multiViewSlots.indices.contains(index) else { break }
+            multiViewSlots[index] = item
+        }
+    }
+
+    private func placeInMultiView(_ item: MediaItem, slot: Int) {
+        guard multiViewSlots.indices.contains(slot) else { return }
+        mainPanelState.show(.multiView)
+        multiViewSlots[slot] = item
+    }
+
+    private func removeFromMultiView(slot: Int) {
+        guard multiViewSlots.indices.contains(slot) else { return }
+        multiViewSlots[slot] = nil
+    }
+
+    private func clearMultiView() {
+        multiViewSlots = [nil, nil, nil, nil]
+    }
+
+    private func resetMultiViewLayout() {
+        multiViewSplitX = 0.5
+        multiViewSplitY = 0.5
+    }
+
+    private func multiViewMenuTitle(for items: [MediaItem]) -> String {
+        guard items.count > 1 else {
+            return "Add to Multi-View"
+        }
+        return "Add \(items.count) to Multi-View"
+    }
+
+    private func multiViewSlotMenuTitle(for slot: Int) -> String {
+        if let item = multiViewSlots[slot] {
+            return "Panel \(slot + 1) — \(item.fileName)"
+        }
+        return "Panel \(slot + 1)"
+    }
+
+    private func handleMultiViewDrop(_ providers: [NSItemProvider], slotIndex: Int) -> Bool {
+        guard let provider = providers.first(where: {
+            $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
+                || $0.hasItemConformingToTypeIdentifier(UTType.plainText.identifier)
+        }) else {
+            return false
+        }
+
+        let identifier = provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
+            ? UTType.fileURL.identifier
+            : UTType.plainText.identifier
+
+        provider.loadItem(forTypeIdentifier: identifier, options: nil) { value, _ in
+            let url: URL?
+            switch value {
+            case let data as Data:
+                if let string = String(data: data, encoding: .utf8) {
+                    url = URL(string: string) ?? URL(string: EditorDragPayload.editorClipID(from: string)?.absoluteString ?? "")
+                } else {
+                    url = nil
+                }
+            case let string as String:
+                url = EditorDragPayload.editorClipID(from: string) ?? URL(string: string)
+            case let providedURL as URL:
+                url = providedURL
+            default:
+                url = nil
+            }
+
+            guard let url, let kind = MediaItem.kind(for: url) else { return }
+            let item = MediaItem(id: url, url: url, kind: kind)
+            Task { @MainActor in
+                placeInMultiView(item, slot: slotIndex)
+            }
+        }
+        return true
     }
 
     private func addToTimeline(_ items: [MediaItem], activateComposer: Bool) {

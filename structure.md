@@ -71,14 +71,21 @@ ContentView
    │  │     ├─ previewMainPanel
    │  │     └─ pinnedPanel
    │  │
-   │  └─ composerWorkbench (Composer tab)
-   │     └─ VSplitView
-   │        ├─ HSplitView
-   │        │  ├─ thumbnailPanel
-   │        │  ├─ clipsPane
-   │        │  ├─ playerPane
-   │        │  └─ pinnedPanel
-   │        └─ timelinePane
+   │  ├─ composerWorkbench (Composer tab)
+   │  │  └─ VSplitView
+   │  │     ├─ HSplitView
+   │  │     │  ├─ thumbnailPanel
+   │  │     │  ├─ clipsPane
+   │  │     │  ├─ playerPane
+   │  │     │  └─ pinnedPanel
+   │  │     └─ timelinePane
+   │  │
+   │  └─ multiViewWorkbench (Multi-View tab)
+   │     └─ HSplitView
+   │        ├─ thumbnailPanel
+   │        └─ multiViewMainPanel
+   │           ├─ multiViewHeader
+   │           └─ multiViewCanvas
    │
    └─ statusBar
       ├─ Open Folder button
@@ -150,6 +157,22 @@ pinnedPanel
 ├─ empty state
 └─ vertical List
    └─ ThumbnailRow
+
+multiViewMainPanel
+├─ multiViewHeader
+│  ├─ "MULTI-VIEW" / "2×2 · looping" labels
+│  ├─ loaded count ("N / 4 loaded")
+│  ├─ Play/Pause all toggle
+│  ├─ Audio/Muted all toggle
+│  ├─ Reset layout
+│  └─ Clear
+└─ multiViewCanvas (GeometryReader)
+   ├─ four multiViewTile slots
+   │  ├─ filled: MultiViewTileContent + overlay (name, kind, LOOP) + remove button
+   │  ├─ empty: dashed "Click or drag a clip here" placeholder
+   │  └─ drop target (file drag from thumbnails or Finder)
+   ├─ vertical / horizontal split dividers (drag to resize)
+   └─ center knob (drag both axes)
 ```
 
 ## Root Overlays And Helpers
@@ -167,6 +190,7 @@ ContentView overlays/background helpers
 View menu
 ├─ Quick Sort Panel checkbox
 ├─ Composer Panel checkbox
+├─ Multi-View Panel checkbox
 └─ Color Theme
    ├─ Amber studio
    ├─ Resolve teal
@@ -191,8 +215,19 @@ The active main panel tab and visible main panel tabs are tracked with `MainPane
 enum MainPanelTab {
     case preview
     case videoComposer
+    case multiView
 }
 ```
+
+The Multi-View tab is a four-slot comparison grid owned by `ContentView` as
+`multiViewSlots` (`[MediaItem?]` of count four) with `multiViewSplitX` / `multiViewSplitY`
+fractions for the draggable dividers and shared `multiViewPaused` / `multiViewMuted`
+flags. Files reach it the same way as pinning or timeline adds: the thumbnail context
+menu's `Add to Multi-View` action (whose submenu also targets `Panel 1`–`Panel 4`), the
+multi-select batch button, dragging a thumbnail onto a panel, or clicking an empty panel.
+The top-level action fills the next empty slot; choosing a panel writes that slot directly.
+Each filled slot renders through `MultiViewTileContent`, and videos loop seamlessly via
+`MultiViewPlayerController` (`AVQueuePlayer` + `AVPlayerLooper`).
 
 The video editor media-bin clip list is owned by `ContentView` as `editorClips`. Clips are
 added from `thumbnailPanel` through the thumbnail context menu's `Add to Clips` action or
@@ -254,6 +289,8 @@ honors those audio settings.
 - Main panel tab state: `Sources/Frameflow/App/MainPanelState.swift`
 - `thumbnailPanel`, `pinnedPanel`, `statusBar`: `Sources/Frameflow/App/ContentView.swift`
 - `mainPanelTabBar`, `activeWorkbench`, `quickSortWorkbench`, `composerWorkbench`: `Sources/Frameflow/App/ContentView.swift`
+- `multiViewWorkbench`, `multiViewHeader`, `multiViewCanvas`, `multiViewTile`, `addToMultiView`: `Sources/Frameflow/App/ContentView.swift`
+- Multi-View looping player and tile content: `Sources/Frameflow/Views/MultiView/MultiViewVideoTile.swift`
 - `clipsPane`, `playerPane`, `timelinePane`, `editingToolbar`, `previewPanel`: `Sources/Frameflow/App/ContentView.swift`
 - Clip-bin card view: `Sources/Frameflow/Views/Composer/EditorClipCard.swift`
 - Folder and thumbnail rows: `Sources/Frameflow/Views/MediaLibrary/ThumbnailRows.swift`
