@@ -57,6 +57,11 @@ struct FrameflowApp: App {
                     set: { mainPanelState.setVisible(.videoComposer, $0, activate: $0) }
                 ))
 
+                Toggle("Multi-View Panel", isOn: Binding(
+                    get: { mainPanelState.isVisible(.multiView) },
+                    set: { mainPanelState.setVisible(.multiView, $0, activate: $0) }
+                ))
+
                 Menu("Color Theme") {
                     ForEach(EditorThemeID.allCases) { theme in
                         Button {

@@ -3,6 +3,7 @@ import SwiftUI
 enum MainPanelTab: Hashable, Identifiable {
     case preview
     case videoComposer
+    case multiView
 
     var id: Self { self }
 
@@ -12,6 +13,8 @@ enum MainPanelTab: Hashable, Identifiable {
             return "Quick Sort"
         case .videoComposer:
             return "Composer"
+        case .multiView:
+            return "Multi-View"
         }
     }
 
@@ -21,13 +24,15 @@ enum MainPanelTab: Hashable, Identifiable {
             return "play.rectangle"
         case .videoComposer:
             return "timeline.selection"
+        case .multiView:
+            return "rectangle.split.2x2"
         }
     }
 }
 
 @MainActor
 final class MainPanelState: ObservableObject {
-    @Published private(set) var visibleTabs: Set<MainPanelTab> = [.preview, .videoComposer]
+    @Published private(set) var visibleTabs: Set<MainPanelTab> = [.preview, .videoComposer, .multiView]
     @Published var activeTab: MainPanelTab = .preview
 
     func isVisible(_ tab: MainPanelTab) -> Bool {
@@ -70,6 +75,9 @@ final class MainPanelState: ObservableObject {
         }
         if visibleTabs.contains(.videoComposer) {
             return .videoComposer
+        }
+        if visibleTabs.contains(.multiView) {
+            return .multiView
         }
         visibleTabs.insert(.preview)
         return .preview

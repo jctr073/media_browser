@@ -9,6 +9,7 @@ Frameflow is a native macOS media sorting and lightweight video composition tool
 - Filter, multi-select, pin, unpin, and copy selected media into another folder.
 - Apply crop and trim edits before exporting pinned media.
 - Capture video frame snapshots into `~/Pictures/FrameflowSnapshots`.
+- Compare up to four clips side by side in a resizable 2×2 Multi-View grid with synchronized looping playback and shared play/mute toggles.
 - Build video timelines from imported clips with drag-and-drop ordering.
 - Trim, split, reorder, mute, and adjust volume on timeline clips.
 - Add timeline crop adjustment spans with keyframes and interpolated crop motion.
@@ -85,16 +86,18 @@ The install script uses `sudo` only when `/Applications` is not writable by the 
 5. Copy pinned files to a destination folder.
 6. Switch to Composer to add clips to a video timeline.
 7. Drag clips onto the timeline, trim/split/reorder them, add crop adjustment spans, then export the timeline.
+8. Switch to Multi-View (or right-click a file and choose **Add to Multi-View**) to compare up to four clips at once in a resizable, looping 2×2 grid.
 
 ## Useful Controls
 
 - `Command-O`: open a folder.
-- `Space`: toggle playback when focus is not in a text field.
+- `Space`: toggle playback when focus is not in a text field (pauses or resumes every loaded clip in Multi-View).
+- Right-click a file: **Add to Multi-View** drops it into the next free panel, or expand the submenu to target Panel 1–4. Drag a file straight onto a panel for the same result.
 - `Loop` checkbox in the player controls: replay video from the start when it reaches the end (on by default).
 - `Return`: apply an active crop, trim, or adjustment crop keyframe.
 - `Escape`: clear an active crop or trim.
 - Arrow keys: nudge an active adjustment crop in Composer.
-- View menu: show or hide the Quick Sort and Composer panels, or switch color themes.
+- View menu: show or hide the Quick Sort, Composer, and Multi-View panels, or switch color themes.
 - `Command-,`: toggle the Tweaks panel for themes, density, and timecode preferences.
 
 ## Development
